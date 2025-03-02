@@ -60,6 +60,7 @@ VIX is typically marked with the ticker symbol “^VIX” or something similar.
 You should verify whether Alpha Vantage can successfully return historical VIX data. If it’s not available or incomplete, you may have to rely on other data sources such as Yahoo Finance to obtain the index.
 
 # 4、A system and data flow diagram.
-![Project Overview](https://github.com/user-attachments/assets/c399649f-5b72-4d6f-afd3-53bef3266023)
 
+![Project Overview](https://github.com/user-attachments/assets/2bee3a84-5930-4a84-b57e-884d9d04df6e)
 
+https://github.com/user-attachments/assets/c399649f-5b72-4d6f-afd3-53bef3266023
