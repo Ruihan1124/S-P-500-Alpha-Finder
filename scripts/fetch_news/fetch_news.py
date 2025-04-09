@@ -1,3 +1,8 @@
+'''
+功能：使用 Alpha Vantage API 抓取市场新闻数据（作为备用来源）
+说明：Alpha Vantage 新闻为全市场新闻流，无法精确针对 ticker，因此推荐作为补充或回退方案使用
+'''
+
 import requests
 import pandas as pd
 import os
