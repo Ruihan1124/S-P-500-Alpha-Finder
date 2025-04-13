@@ -12,10 +12,6 @@ from prophet import Prophet
 import matplotlib.pyplot as plt
 import argparse
 
-# 设置中文字体（避免乱码）
-plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
-plt.rcParams['axes.unicode_minus'] = False
-
 # 获取股票历史数据
 def fetch_stock_data(ticker: str, period="5y") -> pd.DataFrame:
     df = yf.download(ticker, period=period)
@@ -44,9 +40,9 @@ def forecast_stock_price(df: pd.DataFrame, days: int):
 # 生成并保存预测图表
 def plot_forecast(model, forecast, ticker):
     fig = model.plot(forecast)
-    plt.title(f"{ticker} 股票价格预测", fontsize=14)
-    plt.xlabel("日期")
-    plt.ylabel("价格 (USD)")
+    plt.title(f"{ticker} Stock price forecast", fontsize=14)
+    plt.xlabel("Date")
+    plt.ylabel("Price (USD)")
     output_dir = "data/processed"
     os.makedirs(output_dir, exist_ok=True)
     fig_path = os.path.join(output_dir, f"{ticker}_forecast_plot.png")
@@ -68,14 +64,14 @@ def run_stock_prediction(ticker="AAPL", days=30):
     model, forecast = forecast_stock_price(df, days)
     fig_path = plot_forecast(model, forecast, ticker)
     csv_path = save_forecast_to_csv(forecast, ticker)
-    print(f"✅ 图表保存于: {fig_path}")
-    print(f"✅ CSV 保存于: {csv_path}")
+    print(f"✅ saved in:: {fig_path}")
+    print(f"✅ saved in:: {csv_path}")
 
 # CLI 模式支持（同时兼容 Jupyter 和命令行）
 def main():
-    parser = argparse.ArgumentParser(description="Prophet 股票预测器")
-    parser.add_argument("ticker", nargs="?", default="AAPL", help="股票代码")
-    parser.add_argument("days", nargs="?", type=int, default=30, help="预测天数")
+    parser = argparse.ArgumentParser(description="Prophet Stock predictor")
+    parser.add_argument("ticker", nargs="?", default="AAPL", help="Stock code")
+    parser.add_argument("days", nargs="?", type=int, default=30, help="Forecast days")
     args = parser.parse_args()
     run_stock_prediction(args.ticker, args.days)
 
