@@ -227,7 +227,7 @@ elif page == "💼 Portfolio Optimization":
         st.pyplot(fig3)
 
         diff_data = {
-            "指标": ["Annual Return", "Volatility", "Sharpe Ratio", "Max Drawdown"],
+            "index": ["Annual Return", "Volatility", "Sharpe Ratio", "Max Drawdown"],
             "Recommended": [
                 f"{best_portfolio['Annual Return'] * 100:.2f}%",
                 f"{best_portfolio['Volatility'] * 100:.2f}%",
@@ -257,7 +257,7 @@ elif page == "💼 Portfolio Optimization":
         st.subheader("🧠 Ask AI about Portfolio Suggestions")
         question = st.text_input("Your question about the portfolio:", key="portfolio_q")
         if st.button("Ask AI (Portfolio)"):
-            prompt = f"以下是五个候选投资组合的信息，请基于此回答我的问题：\n\n{summary}\n\n问题：{question}"
+            prompt = f"Here are five candidate portfolio information, please answer my questions based on this:\n\n{summary}\n\n问题：{question}"
             response = requests.post(
                 GEMINI_URL,
                 params={"key": GEMINI_API_KEY},
