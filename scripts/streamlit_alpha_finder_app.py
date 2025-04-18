@@ -12,7 +12,7 @@ from FinBERT_sentiment_forecast import (
     merge_data, forecast_with_regressors, plot_forecast, save_forecast_to_csv,
     plot_sentiment_trend, GEMINI_API_KEY, GEMINI_URL
 )
-from portfolio_data import fetch_price_data
+# from portfolio_data import fetch_price_data
 from Asset_allocation_gpt import generate_random_portfolios, summarize_top_n_portfolios
 from ticker_resolver import get_sp500_tickers
 
@@ -85,12 +85,12 @@ if page == "📊 Stock Analysis":
                 [f"{row['date']}: score = {row['weighted_score']:.3f}" for _, row in summary_sentiment.iterrows()]
             )
             prompt = (
-                "以下是某支股票的分析结果，包括两部分内容：\n"
-                "\n📉 市场情绪分析（weighted sentiment score，近几日）：\n"
+                "The following is an analysis of a specific stock, consisting of two parts:\n"
+                "\n📉 Market sentiment analysis (weighted sentiment score, recent days):\n"
                 f"{sentiment_lines}\n"
-                "\n📈 股价预测（Prophet 模型，未来几日）：\n"
+                "\n📈 Stock price forecast (Prophet model, next few days):\n"
                 f"{summary_price}\n"
-                f"\n请基于这两个部分回答用户的问题：{user_q}"
+                f"\nPlease answer the user's question based on the two parts above: {user_q}"
             )
 
             response = requests.post(
@@ -109,32 +109,23 @@ if page == "📊 Stock Analysis":
 elif page == "💼 Portfolio Optimization":
     st.header("💼 Portfolio Optimization with AI")
 
-    days = st.slider("Lookback Days (max ~365):", 100, 400, 252)
     max_dd = st.slider("Max Acceptable Drawdown (%):", 5, 50, 20)
     capital = st.number_input("Total Investment ($):", min_value=1000, value=10000)
-    run_portfolio = st.button("Generate Optimized Portfolios")
 
-    if run_portfolio:
+    if 'run_optimization' not in st.session_state:
+        st.session_state.run_optimization = False
+
+    if st.button("Generate Optimized Portfolios"):
         try:
-            st.info("Fetching price data from Alpha Vantage...")
-            prices_df = fetch_price_data(days)
-            prices_df.to_csv("prices.csv")
+            st.session_state.run_optimization = True
+            st.info("Loading price data from prices.csv...")
+            prices_df = pd.read_csv("prices.csv", index_col=0, parse_dates=True)
+            st.session_state.prices_df = prices_df
 
             st.success("Generating portfolios...")
             results_df, weights_list = generate_random_portfolios(prices_df, num_portfolios=3000)
-
-            st.subheader("Efficient Frontier")
-            fig, ax = plt.subplots()
-            sc = ax.scatter(
-                results_df['Volatility'],
-                results_df['Annual Return'],
-                c=results_df['Sharpe Ratio'],
-                cmap='viridis', alpha=0.6
-            )
-            ax.set_xlabel("Volatility")
-            ax.set_ylabel("Annual Return")
-            ax.set_title("Efficient Frontier")
-            st.pyplot(fig)
+            st.session_state.results_df = results_df
+            st.session_state.weights_list = weights_list
 
             threshold = -max_dd / 100
             valid_idx = results_df[results_df['Max Drawdown'] >= threshold].index
@@ -142,29 +133,142 @@ elif page == "💼 Portfolio Optimization":
 
             if valid_df.empty:
                 st.warning("No portfolios match the drawdown limit. Try increasing tolerance.")
+                st.session_state.run_optimization = False
             else:
-                top5 = valid_df.head(5)
-                st.subheader("Top 5 Portfolios by Sharpe Ratio")
+                top5 = valid_df.head(5).copy()
                 top5['Sharpe Ratio'] = top5['Sharpe Ratio'].round(2)
-                st.dataframe(top5)
 
-                summary = summarize_top_n_portfolios(prices_df, top5, [weights_list[i] for i in top5.index])
+                comp_list = []
+                for idx in top5.index:
+                    w = weights_list[idx]
+                    comp_str = " | ".join(f"{col}={w_val * 100:.2f}%" for col, w_val in zip(prices_df.columns, w))
+                    comp_list.append(comp_str)
+                top5["Composition"] = comp_list
 
-                st.subheader("🧠 Ask AI about Portfolio Suggestions")
-                question = st.text_input("Your question about the portfolio:", key="portfolio_q")
-                if st.button("Ask AI (Portfolio)"):
-                    prompt = f"以下是五个候选投资组合的信息，请基于此回答我的问题：\n\n{summary}\n\n问题：{question}"
-                    response = requests.post(
-                        GEMINI_URL,
-                        params={"key": GEMINI_API_KEY},
-                        headers={"Content-Type": "application/json"},
-                        json={"contents": [{"parts": [{"text": prompt}]}]}
-                    )
-                    if response.status_code == 200:
-                        reply = response.json()['candidates'][0]['content']['parts'][0]['text']
-                        st.markdown(f"**AI Response:** {reply}")
-                    else:
-                        st.error("❌ Gemini API Error")
+                st.session_state.top5 = top5
+                st.session_state.valid_df = valid_df
 
         except Exception as e:
             st.error(f"❌ Error: {e}")
+            st.session_state.run_optimization = False
+
+    if st.session_state.run_optimization:
+        prices_df = st.session_state.prices_df
+        weights_list = st.session_state.weights_list
+        top5 = st.session_state.top5
+
+        st.subheader("Top 5 Portfolios by Sharpe Ratio + Allocation")
+        st.dataframe(top5, use_container_width=True)
+
+        best_idx = top5.index[0]
+        best_portfolio = top5.loc[best_idx]
+        best_weights = weights_list[best_idx]
+
+        st.subheader("🌟 Recommended Portfolio (Highest Sharpe Ratio)")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"**Annual Return:** {best_portfolio['Annual Return'] * 100:.2f}%")
+            st.markdown(f"**Volatility:** {best_portfolio['Volatility'] * 100:.2f}%")
+            st.markdown(f"**Sharpe Ratio:** {best_portfolio['Sharpe Ratio']:.2f}")
+            st.markdown(f"**Max Drawdown:** {best_portfolio['Max Drawdown'] * 100:.2f}%")
+        with col2:
+            potential_loss = abs(best_portfolio["Max Drawdown"]) * capital
+            st.markdown(f"**Capital:** ${capital:,.2f}")
+            st.markdown(f"**Est. Max Loss:** ${potential_loss:,.2f}")
+
+        st.markdown("**Asset Allocation:**")
+        for asset, w in zip(prices_df.columns, best_weights):
+            st.markdown(f"- {asset}: {w * 100:.2f}%")
+
+        st.subheader("📈 Cumulative Return of Recommended Portfolio")
+        port_val = (prices_df * best_weights).sum(axis=1)
+        cumulative = port_val / port_val.iloc[0]
+        fig2, ax2 = plt.subplots()
+        ax2.plot(cumulative.index, cumulative.values)
+        ax2.set_title("Cumulative Return")
+        ax2.set_ylabel("Normalized Value")
+        ax2.set_xlabel("Date")
+        ax2.grid(True)
+        st.pyplot(fig2)
+
+        st.subheader("🔍 Select Your Favorite Portfolio (1–5)")
+        option = st.selectbox("Choose one portfolio to compare with the system recommendation:", [1, 2, 3, 4, 5])
+
+        chosen_idx = top5.index[option - 1]
+        chosen_portfolio = top5.loc[chosen_idx]
+        chosen_weights = weights_list[chosen_idx]
+
+        st.markdown(f"### 🧩 You Selected: Portfolio {option}")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"**Annual Return:** {chosen_portfolio['Annual Return'] * 100:.2f}%")
+            st.markdown(f"**Volatility:** {chosen_portfolio['Volatility'] * 100:.2f}%")
+            st.markdown(f"**Sharpe Ratio:** {chosen_portfolio['Sharpe Ratio']:.2f}")
+            st.markdown(f"**Max Drawdown:** {chosen_portfolio['Max Drawdown'] * 100:.2f}%")
+        with col2:
+            potential_loss2 = abs(chosen_portfolio["Max Drawdown"]) * capital
+            st.markdown(f"**Est. Max Loss:** ${potential_loss2:,.2f}")
+
+        st.markdown("**Your Portfolio Allocation:**")
+        for asset, w in zip(prices_df.columns, chosen_weights):
+            st.markdown(f"- {asset}: {w * 100:.2f}%")
+
+        st.subheader("📉 Comparison of Recommended vs Your Selected Portfolio")
+        cum_best = (prices_df * best_weights).sum(axis=1) / (prices_df * best_weights).sum(axis=1).iloc[0]
+        cum_user = (prices_df * chosen_weights).sum(axis=1) / (prices_df * chosen_weights).sum(axis=1).iloc[0]
+        fig3, ax3 = plt.subplots()
+        ax3.plot(cum_best.index, cum_best.values, label="Recommended", linewidth=2)
+        ax3.plot(cum_user.index, cum_user.values, label=f"Portfolio {option}", linestyle='--', linewidth=2)
+        ax3.set_title("Cumulative Return Comparison")
+        ax3.set_ylabel("Normalized Value")
+        ax3.set_xlabel("Date")
+        ax3.legend()
+        ax3.grid(True)
+        st.pyplot(fig3)
+
+        diff_data = {
+            "指标": ["Annual Return", "Volatility", "Sharpe Ratio", "Max Drawdown"],
+            "Recommended": [
+                f"{best_portfolio['Annual Return'] * 100:.2f}%",
+                f"{best_portfolio['Volatility'] * 100:.2f}%",
+                f"{best_portfolio['Sharpe Ratio']:.2f}",
+                f"{best_portfolio['Max Drawdown'] * 100:.2f}%"
+            ],
+            f"Portfolio {option}": [
+                f"{chosen_portfolio['Annual Return'] * 100:.2f}%",
+                f"{chosen_portfolio['Volatility'] * 100:.2f}%",
+                f"{chosen_portfolio['Sharpe Ratio']:.2f}",
+                f"{chosen_portfolio['Max Drawdown'] * 100:.2f}%"
+            ],
+            "Difference": [
+                f"{(best_portfolio['Annual Return'] - chosen_portfolio['Annual Return']) * 100:.2f}%",
+                f"{(best_portfolio['Volatility'] - chosen_portfolio['Volatility']) * 100:.2f}%",
+                f"{best_portfolio['Sharpe Ratio'] - chosen_portfolio['Sharpe Ratio']:.2f}",
+                f"{(best_portfolio['Max Drawdown'] - chosen_portfolio['Max Drawdown']) * 100:.2f}%"
+            ]
+        }
+        st.subheader("📋 Performance Comparison Table")
+        st.dataframe(pd.DataFrame(diff_data), use_container_width=True)
+
+        # === AI 问答区 ===
+        top5_weights = [weights_list[i] for i in top5.index]
+        summary = summarize_top_n_portfolios(prices_df, top5, top5_weights)
+
+        st.subheader("🧠 Ask AI about Portfolio Suggestions")
+        question = st.text_input("Your question about the portfolio:", key="portfolio_q")
+        if st.button("Ask AI (Portfolio)"):
+            prompt = f"以下是五个候选投资组合的信息，请基于此回答我的问题：\n\n{summary}\n\n问题：{question}"
+            response = requests.post(
+                GEMINI_URL,
+                params={"key": GEMINI_API_KEY},
+                headers={"Content-Type": "application/json"},
+                json={"contents": [{"parts": [{"text": prompt}]}]}
+            )
+            if response.status_code == 200:
+                try:
+                    reply = response.json()['candidates'][0]['content']['parts'][0]['text']
+                    st.markdown(f"**AI Response:** {reply}")
+                except Exception as e:
+                    st.error(f"Response parsing error: {e}")
+            else:
+                st.error("❌ Gemini API Error")

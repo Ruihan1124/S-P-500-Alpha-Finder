@@ -77,11 +77,8 @@ def fetch_price_data(days):
 
 
 def main():
-    try:
-        days = int(input("请输入要回溯的天数："))
-    except ValueError:
-        print("请输入有效的整数天数。")
-        return
+    days = 1090
+
 
     print("正在获取历史价格数据，请稍候...")
     price_df = fetch_price_data(days)
