@@ -19,6 +19,8 @@
 
 Note: 免费版 Finnhub API 仅支持抓取过去 7 天内的新闻数据。
 """
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import os
 import pandas as pd
@@ -139,13 +141,17 @@ def plot_sentiment_trend(df, ticker):
     plt.tight_layout()
     plt.show()
 
-
+from ticker_resolver import get_sp500_tickers, resolve_ticker_local
 # ========== 主流程 ==========
 def run_pipeline():
-    ticker = input("请输入股票代码 (如 AAPL): ").upper()
-    if not ticker.isalpha() or len(ticker) > 5:
-        print("❌ 股票代码格式错误")
+    sp500_dict = get_sp500_tickers()
+    if not sp500_dict:
+        print("❌ 无法加载 S&P500 公司列表，请检查网络连接。")
         return
+
+    # 进入交互模式，输入公司名称或代码
+    ticker = resolve_ticker_local(sp500_dict)
+    print("✅ 你选择的股票代码是：", ticker)
 
     try:
         days = int(input("请输入分析天数 (建议填 7): "))
@@ -158,6 +164,62 @@ def run_pipeline():
     if news_file:
         df = analyze_sentiment(news_file, ticker, days, source)
         plot_sentiment_trend(df, ticker)
+    summary_text = summarize_sentiment_trend(df, ticker)
+    ask_gemini_about_sentiment(summary_text)
+
+
+
+#####ai交互
+
+def summarize_sentiment_trend(df, ticker):
+    summary = [f"Ticker: {ticker}\n"]
+    daily = df.groupby('date')['weighted_score'].mean().reset_index()
+
+    for _, row in daily.iterrows():
+        summary.append(f"{row['date']}: weighted sentiment score = {row['weighted_score']:.3f}")
+
+    summary.append("\n最高得分日期: " + str(daily.loc[daily['weighted_score'].idxmax(), 'date']))
+    summary.append("最低得分日期: " + str(daily.loc[daily['weighted_score'].idxmin(), 'date']))
+
+    return "\n".join(summary)
+
+
+import requests
+
+GEMINI_API_KEY = 'AIzaSyA_6-8P1nNtRrSniqW4TWAFM43veS7xaPM'
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+def ask_gemini_about_sentiment(summary_text):
+    print("\n你现在可以就情绪走势数据提问（输入 'exit' 退出）：")
+
+    while True:
+        user_input = input("你：")
+        if user_input.lower() in ["exit", "quit", "退出"]:
+            print("对话结束。")
+            break
+
+        prompt = (
+            "以下是某支股票过去几天的情绪分析数据，包括每日加权情绪得分、情绪波动趋势。"
+            "请基于这些信息回答用户的问题：\n\n"
+            f"{summary_text}\n\n用户提问：{user_input}"
+        )
+
+        response = requests.post(
+            GEMINI_URL,
+            params={"key": GEMINI_API_KEY},
+            headers={"Content-Type": "application/json"},
+            json={"contents": [{"parts": [{"text": prompt}]}]}
+        )
+
+        if response.status_code == 200:
+            try:
+                reply = response.json()['candidates'][0]['content']['parts'][0]['text']
+                print("AI：" + reply)
+            except Exception as e:
+                print("解析错误：", e)
+        else:
+            print("请求出错：", response.text)
+
 
 if __name__ == "__main__":
     run_pipeline()

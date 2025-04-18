@@ -1,40 +1,58 @@
-# ========== run_sentiment_pipeline.py ==========
-"""
-功能：
-1️⃣ 输入股票代码和分析天数，抓取相关新闻
-2️⃣ 使用 FinBERT 进行情绪分析
-3️⃣ 生成并保存包含 weighted_score 的 CSV 文件
-4️⃣ 可视化过去 N 天情绪趋势折线图
-"""
-
 import os
 import pandas as pd
-import argparse
+import yfinance as yf
+from prophet import Prophet
 import matplotlib.pyplot as plt
+from fetch_news.news_api import get_news
+from datetime import datetime
+import requests
 from transformers import BertTokenizer, BertForSequenceClassification
 import torch
 from tqdm import tqdm
-from fetch_news.news_api import get_news
+from ticker_resolver import get_sp500_tickers, resolve_ticker_local
 
-# 加载 FinBERT 模型
+# ========== Gemini LLM 设置 ==========
+GEMINI_API_KEY = 'AIzaSyA_6-8P1nNtRrSniqW4TWAFM43veS7xaPM'
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+def ask_gemini_combined(summary_price, summary_sentiment):
+    prompt = (
+        "The following is the analysis result of a certain stock, including two parts:\n"
+        "\n📉 市场情绪分析（weighted sentiment score, recent days）：\n"
+        f"{summary_sentiment}\n"
+        "\n📈 Stock price forecast (Prophet model, next few days):\n"
+        f"{summary_price}\n"
+        "\nPlease generate an overall trend interpretation based on these two parts and answer the questions raised by users."
+    )
+
+    print("\nYou can now ask questions about [Forecast + Sentiment] (type 'exit' to exit):")
+    while True:
+        user_input = input("You:")
+        if user_input.lower() in ["exit", "quit", "退出"]:
+            print("The conversation ends.")
+            break
+
+        user_prompt = prompt + f"\n\nUser question:{user_input}"
+
+        response = requests.post(
+            GEMINI_URL,
+            params={"key": GEMINI_API_KEY},
+            headers={"Content-Type": "application/json"},
+            json={"contents": [{"parts": [{"text": user_prompt}]}]}
+        )
+
+        if response.status_code == 200:
+            try:
+                reply = response.json()['candidates'][0]['content']['parts'][0]['text']
+                print("AI：" + reply)
+            except Exception as e:
+                print("❌ 解析错误：", e)
+        else:
+            print("❌ 请求失败：", response.text)
+
+# ========== FinBERT 情绪分析模块 ==========
 tokenizer = BertTokenizer.from_pretrained('ProsusAI/finbert')
 model = BertForSequenceClassification.from_pretrained('ProsusAI/finbert')
-
-def fetch_news(ticker, days, source='finnhub'):
-    if days > 7 and source == 'finnhub':
-        print("⚠️ 免费版 Finnhub API 只能抓取过去 7 天的新闻")
-        return None
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    save_path = os.path.join(project_root, "data", "raw")
-    os.makedirs(save_path, exist_ok=True)
-    df = get_news(ticker, days, source)
-    if df is not None and not df.empty:
-        output_file = f"{ticker}_news_{days}d_{source}.csv"
-        df.to_csv(os.path.join(save_path, output_file), index=False)
-        print(f"✅ News saved to {output_file}")
-        return os.path.join(save_path, output_file)
-    print("⚠️ No news found")
-    return None
 
 def classify_sentiment(text):
     inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
@@ -45,23 +63,15 @@ def classify_sentiment(text):
     label_map = {0: 'negative', 1: 'neutral', 2: 'positive'}
     return label_map[prediction.item()], round(confidence.item(), 4)
 
-def plot_sentiment_trend(df, ticker):
-    df['date'] = pd.to_datetime(df['datetime']).dt.date
-    trend = df.groupby('date')['weighted_score'].mean()
-    plt.figure(figsize=(10, 5))
-    trend.plot(kind='line', marker='o')
-    plt.title(f"{ticker} - Past {len(trend)} Days Weighted Sentiment Trend")
-    plt.ylabel("Weighted Sentiment Score")
-    plt.xlabel("Date")
-    plt.grid(True)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.show()
+def fetch_and_analyze_sentiment(ticker, days=7, source='finnhub'):
+    save_path = os.path.join("data", "processed")
+    os.makedirs(save_path, exist_ok=True)
+    df = get_news(ticker, days, source=source)
+    if df is None or df.empty or 'headline' not in df.columns:
+        raise ValueError("无法抓取新闻或缺少 headline 列")
 
-def analyze_sentiment(filepath, ticker, days, source):
-    df = pd.read_csv(filepath)
     sentiments, confidences = [], []
-    for text in tqdm(df['headline']):
+    for text in tqdm(df['headline'], desc="情绪分析中"):
         label, conf = classify_sentiment(str(text))
         sentiments.append(label)
         confidences.append(conf)
@@ -72,103 +82,127 @@ def analyze_sentiment(filepath, ticker, days, source):
     df['score'] = df['sentiment'].map({'positive': 1, 'neutral': 0, 'negative': -1})
 
     source_weights = {
-        'seekingalpha': 1.2, 'marketwatch': 1.0, 'bloomberg': 1.1, 'cnbc': 0.9, 'wsj': 1.2,
-        'benzinga': 0.8, 'yahoo': 1.0, 'investorplace': 0.85, 'reuters': 1.1, 'fool': 0.95, 'default': 1.0
+        'seekingalpha': 1.2, 'marketwatch': 1.0, 'bloomberg': 1.1, 'cnbc': 0.9,
+        'wsj': 1.2, 'benzinga': 0.8, 'yahoo': 1.0, 'investorplace': 0.85,
+        'reuters': 1.1, 'fool': 0.95, 'default': 1.0
     }
-    df['source_weight'] = df['source'].apply(lambda x: source_weights.get(str(x).lower(), 1.0))
+    def get_weight(source_name):
+        return source_weights.get(str(source_name).lower(), source_weights['default'])
+
+    df['source_weight'] = df['source'].apply(get_weight)
     df['weighted_score'] = df['score'] * df['source_weight']
+    return df
 
-    processed_path = os.path.join(os.path.dirname(filepath), "..", "processed")
-    os.makedirs(processed_path, exist_ok=True)
-    output_file = os.path.join(processed_path, f"{ticker}_news_{days}d_{source}_sentiment.csv")
-    df.to_csv(output_file, index=False)
-    print(f"✅ Sentiment data saved to: {output_file}")
-    plot_sentiment_trend(df, ticker)
-
-def main():
-    ticker = input("请输入股票代码（如 AAPL）: ").upper()
-    days = int(input("请输入分析天数（建议 7）: "))
-    source = 'finnhub'
-
-    news_file = fetch_news(ticker, days, source)
-    if news_file:
-        analyze_sentiment(news_file, ticker, days, source)
-
-if __name__ == "__main__":
-    main()
-
-
-# ========== stock_forecast_with_sentiment.py ==========
-"""
-功能：
-1️⃣ 下载股票历史数据
-2️⃣ 合并情绪得分
-3️⃣ 使用 Prophet 进行预测并可视化
-4️⃣ 可引入人为设定的特殊事件（如 Trump 发言）作为影响因子（后续扩展）
-"""
-
-import pandas as pd
-import argparse
-from prophet import Prophet
-import matplotlib.pyplot as plt
-import yfinance as yf
-import os
-
-def fetch_stock_data(ticker, period="5y"):
+# ========== Stock Data ==========
+def fetch_stock_data(ticker: str, period="5y") -> pd.DataFrame:
     df = yf.download(ticker, period=period)
     df = df[["Close"]].copy()
     df.columns = ["y"]
     df = df.reset_index().rename(columns={"Date": "ds"})
-    df.dropna(inplace=True)
+    df["y"] = pd.to_numeric(df["y"], errors="coerce")
+    df.dropna(subset=["y", "ds"], inplace=True)
     return df
 
-def merge_sentiment(df_stock, sentiment_path):
-    df_sent = pd.read_csv(sentiment_path)
-    df_sent['ds'] = pd.to_datetime(df_sent['date'])
-    df_sent = df_sent.groupby('ds')['weighted_score'].mean().reset_index()
-    df_sent.columns = ['ds', 'sentiment_score']
-    df_merged = pd.merge(df_stock, df_sent, on='ds', how='left')
-    df_merged['sentiment_score'].fillna(method='ffill', inplace=True)
-    df_merged['sentiment_score'].fillna(0, inplace=True)
-    return df_merged
+# ========== Daily Sentiment ==========
+def prepare_sentiment_daily(sentiment_df):
+    sentiment_df['ds'] = pd.to_datetime(sentiment_df['date'])
+    daily_sentiment = sentiment_df.groupby('ds')['weighted_score'].mean().reset_index()
+    daily_sentiment.rename(columns={'weighted_score': 'sentiment_score'}, inplace=True)
+    return daily_sentiment
 
-def run_forecast(df, days, ticker):
+# ========== Sentiment Trend Plot ==========
+def plot_sentiment_trend(sentiment_df, ticker):
+    sentiment_df['ds'] = pd.to_datetime(sentiment_df['date'])
+    daily_avg = sentiment_df.groupby('ds')['weighted_score'].mean()
+    if daily_avg.empty:
+        print("⚠️ 无有效情绪数据用于绘图")
+        return
+
+    plot_path = os.path.join("data", "plots")
+    os.makedirs(plot_path, exist_ok=True)
+
+    plt.figure(figsize=(10, 5))
+    daily_avg.plot(kind='line', marker='o')
+    plt.title(f"{ticker} - Daily Weighted Sentiment Score")
+    plt.ylabel("Weighted Sentiment Score (-1 to 1)")
+    plt.xlabel("Date")
+    plt.grid(True)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(os.path.join(plot_path, f"{ticker}_sentiment_trend.png"))
+    plt.close()
+
+# ========== Merge + President ==========
+def merge_data(price_df, sentiment_df):
+    df = pd.merge(price_df, sentiment_df, on='ds', how='left')
+    df['sentiment_score'] = df['sentiment_score'].fillna(method='ffill').fillna(0)
+    df['president'] = df['ds'].apply(lambda x: 1 if x >= pd.to_datetime('2021-01-20') else 0)
+    return df
+
+# ========== Forecast ==========
+def forecast_with_regressors(df, days):
     model = Prophet()
     model.add_regressor('sentiment_score')
+    model.add_regressor('president')
     model.fit(df)
+
     future = model.make_future_dataframe(periods=days)
-    future = pd.merge(future, df[['ds', 'sentiment_score']], on='ds', how='left')
-    future['sentiment_score'].fillna(method='ffill', inplace=True)
+    last_sentiment = df['sentiment_score'].iloc[-1]
+    future['sentiment_score'] = last_sentiment
+    last_president = df['president'].iloc[-1]
+    future['president'] = last_president
+
     forecast = model.predict(future)
+    return model, forecast
+
+# ========== Save ==========
+def plot_forecast(model, forecast, ticker):
     fig = model.plot(forecast)
-    plt.title(f"{ticker} Stock Forecast with Sentiment")
-    plt.tight_layout()
-    plt.show()
+    plt.title(f"{ticker} Stock Price Forecast (with Sentiment & President)")
+    plt.xlabel("Date")
+    plt.ylabel("Price (USD)")
+    output_dir = "data/processed"
+    os.makedirs(output_dir, exist_ok=True)
+    fig_path = os.path.join(output_dir, f"{ticker}_combined_forecast_plot.png")
+    fig.savefig(fig_path)
+    plt.close(fig)
+    return fig_path
 
+def save_forecast_to_csv(forecast, ticker):
+    output_dir = "data/processed"
+    os.makedirs(output_dir, exist_ok=True)
+    csv_path = os.path.join(output_dir, f"{ticker}_combined_forecast.csv")
+    forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].to_csv(csv_path, index=False)
+    return csv_path
 
-def main():
-    ticker = input("请输入股票代码（如 AAPL）: ").upper()
-    days = int(input("请输入预测天数（建议 7）: "))
+# ========== Run Main ==========
+def run_combined_forecast(ticker):
+    days = 7  # 固定为7天，因为免费版Finnhub只支持7天
 
-    df_stock = fetch_stock_data(ticker)
-    sentiment_path = f"data/processed/{ticker}_news_{days}d_finnhub_sentiment.csv"
-    df_merged = merge_sentiment(df_stock, sentiment_path)
-    run_forecast(df_merged, days, ticker)
+    price_df = fetch_stock_data(ticker)
+    sentiment_raw = fetch_and_analyze_sentiment(ticker, days)
+    sentiment_df = prepare_sentiment_daily(sentiment_raw)
+    merged_df = merge_data(price_df, sentiment_df)
+    model, forecast = forecast_with_regressors(merged_df, days)
+
+    # 📈 绘制情绪趋势图
+    plot_sentiment_trend(sentiment_raw, ticker)
+
+    fig_path = plot_forecast(model, forecast, ticker)
+    csv_path = save_forecast_to_csv(forecast, ticker)
+    print(f"✅ Forecast plot saved: {fig_path}")
+    print(f"✅ Forecast data saved: {csv_path}")
+    print(f"✅ Sentiment trend saved: data/plots/{ticker}_sentiment_trend.png")
+
+    # 合并分析摘要并与 Gemini 交互
+    summary_price = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(7).to_string(index=False)
+    summary_sentiment = sentiment_raw.groupby('date')['weighted_score'].mean().reset_index()
+    sentiment_lines = "\n".join(
+        [f"{row['date']}: score = {row['weighted_score']:.3f}" for _, row in summary_sentiment.iterrows()]
+    )
+
+    ask_gemini_combined(summary_price, sentiment_lines)
+
 
 if __name__ == "__main__":
-    main()
-
-
-# ========== main.py ==========
-"""
-功能：统一运行 情绪分析 + 股票预测 两个模块（基于用户手动输入）
-"""
-
-import subprocess
-
-if __name__ == "__main__":
-    ticker = input("请输入股票代码（如 AAPL）: ").upper()
-    days = input("请输入分析天数（建议 7）: ")
-
-    subprocess.run(["python", "run_sentiment_pipeline.py", "--ticker", ticker, "--days", days])
-    subprocess.run(["python", "stock_forecast_with_sentiment.py", "--ticker", ticker, "--days", days])
+    run_combined_forecast()

@@ -67,20 +67,61 @@ def run_stock_prediction(ticker="AAPL", days=30):
     print(f"✅ saved in:: {fig_path}")
     print(f"✅ saved in:: {csv_path}")
 
+
+
+from ticker_resolver import get_sp500_tickers, resolve_ticker_local
+
 # CLI 模式支持（同时兼容 Jupyter 和命令行）
+import argparse
+
 def main():
-    parser = argparse.ArgumentParser(description="Prophet Stock predictor")
-    parser.add_argument("ticker", nargs="?", default="AAPL", help="Stock code")
-    parser.add_argument("days", nargs="?", type=int, default=30, help="Forecast days")
+    parser = argparse.ArgumentParser(description="📈 Prophet Stock Predictor")
+    parser.add_argument("ticker", nargs="?", help="股票代码或公司名称（如 AAPL 或 Apple）")
+    parser.add_argument("days", nargs="?", type=int, default=30, help="预测天数（默认30天）")
     args = parser.parse_args()
-    run_stock_prediction(args.ticker, args.days)
+
+    # 加载 S&P500 数据（公司名 -> 股票代码）
+    sp500_dict = get_sp500_tickers()
+    if not sp500_dict:
+        print("❌ 无法加载 S&P500 公司列表，请检查网络连接或重试。")
+        return
+
+    if args.ticker:
+        # 用户传入公司名或代码
+        keyword = args.ticker.strip().lower()
+        matches = {name: symbol for name, symbol in sp500_dict.items() if keyword in name.lower() or keyword == symbol.lower()}
+        if not matches:
+            print("❌ 未找到对应的公司名称或股票代码，请检查拼写")
+            return
+        elif len(matches) == 1:
+            name, resolved_ticker = list(matches.items())[0]
+            print(f"✅ 找到：{name}（{resolved_ticker}）")
+        else:
+            print("🔍 找到多个匹配项，请选择：")
+            for i, (name, symbol) in enumerate(matches.items()):
+                print(f"{i+1}. {name} ({symbol})")
+            try:
+                choice = int(input("请输入对应序号："))
+                if 1 <= choice <= len(matches):
+                    resolved_ticker = list(matches.values())[choice - 1]
+                else:
+                    print("❌ 无效选择。")
+                    return
+            except:
+                print("❌ 输入无效。")
+                return
+        run_stock_prediction(resolved_ticker, args.days)
+    else:
+        # 没传入公司名，进入交互模式
+        resolved_ticker = resolve_ticker_local(sp500_dict)
+        run_stock_prediction(resolved_ticker, args.days)
+
 
 if __name__ == "__main__":
     if not any('ipykernel_launcher' in arg or 'jupyter' in arg for arg in sys.argv):
         main()
 
-# 运行主函数（AAPL为例，其他股票只需更改股票代码即可）（不会自动触发 main()，要手动）
-run_stock_prediction("AAPL", 30)
+
 
 # 显示图像（可选）
 from IPython.display import Image, display
@@ -89,3 +130,4 @@ display(Image(filename="data/processed/AAPL_forecast_plot.png"))
 # 查看保存内容
 import pandas as pd
 pd.read_csv("data/processed/AAPL_forecast_data.csv").tail()
+
