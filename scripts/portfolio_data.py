@@ -40,9 +40,9 @@ def get_asset_prices_alpha(ticker, days):
     df = pd.DataFrame(records, columns=["date", "close"])
     df = df.sort_values("date").set_index("date")
     # 过滤出最近 days 天的数据
-    start_date = datetime.datetime.now() - datetime.timedelta(days=days) - datetime.timedelta(days=365)
+    start_date = datetime.datetime.now() - datetime.timedelta(days=days)
     # df = df[(df.index >= start_date)]
-    df = df[(df.index >= start_date) & (df.index <= datetime.datetime.now() - datetime.timedelta(days=365))]
+    df = df[(df.index >= start_date) & (df.index <= datetime.datetime.now())]
     return df
 
 

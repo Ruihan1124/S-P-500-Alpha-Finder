@@ -81,15 +81,25 @@ def fetch_and_analyze_sentiment(ticker, days=7, source='finnhub'):
     df['date'] = pd.to_datetime(df['datetime']).dt.date
     df['score'] = df['sentiment'].map({'positive': 1, 'neutral': 0, 'negative': -1})
 
+    # 设定来源权重表
     source_weights = {
         'seekingalpha': 1.2, 'marketwatch': 1.0, 'bloomberg': 1.1, 'cnbc': 0.9,
         'wsj': 1.2, 'benzinga': 0.8, 'yahoo': 1.0, 'investorplace': 0.85,
         'reuters': 1.1, 'fool': 0.95, 'default': 1.0
     }
-    def get_weight(source_name):
-        return source_weights.get(str(source_name).lower(), source_weights['default'])
 
+    # 获取最大权重（用于归一化）
+    max_weight = max(source_weights.values())
+
+    # 定义函数用于获取权重并归一化到 [0, 1]
+    def get_weight(source_name):
+        raw_weight = source_weights.get(str(source_name).lower(), source_weights['default'])
+        return raw_weight / max_weight  # 归一化到 [0, 1]
+
+    # 应用权重
     df['source_weight'] = df['source'].apply(get_weight)
+
+    # 计算归一化的加权得分：-1 * weight ~ +1 * weight => 仍然在 [-1, 1]
     df['weighted_score'] = df['score'] * df['source_weight']
     return df
 
