@@ -12,13 +12,13 @@ from tqdm import tqdm
 from ticker_resolver import get_sp500_tickers, resolve_ticker_local
 
 # ========== Gemini LLM 设置 ==========
-GEMINI_API_KEY = 'AIzaSyA_6-8P1nNtRrSniqW4TWAFM43veS7xaPM'
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+GEMINI_API_KEY = 'Your API key'
+GEMINI_URL = "Your URL"
 
 def ask_gemini_combined(summary_price, summary_sentiment):
     prompt = (
         "The following is the analysis result of a certain stock, including two parts:\n"
-        "\n📉 市场情绪分析（weighted sentiment score, recent days）：\n"
+        "\n📉 Sentiment Analysis（weighted sentiment score, recent days）：\n"
         f"{summary_sentiment}\n"
         "\n📈 Stock price forecast (Prophet model, next few days):\n"
         f"{summary_price}\n"
