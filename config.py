@@ -1,6 +1,10 @@
-# add api and secret key here
-FINNHUB_API_KEY = "cusne49r01qnihs7ldd0cusne49r01qnihs7lddg"
-ALPHA_VANTAGE_API_KEY = "5JCSBHR4UV9VS19K"
-NEWS_API_KEY = "754cba392288404cb3909e256f979726"
-GEMINI_API_KEY = 'AIzaSyA_6-8P1nNtRrSniqW4TWAFM43veS7xaPM'
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
+ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_URL = os.getenv("GEMINI_URL")
