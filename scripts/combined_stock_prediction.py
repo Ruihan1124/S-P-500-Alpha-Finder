@@ -1,4 +1,4 @@
-import os
+import streamlit as st
 import pandas as pd
 import yfinance as yf
 from prophet import Prophet
@@ -8,8 +8,8 @@ from datetime import datetime
 import requests
 
 # ========== Gemini LLM 设置 ==========
-GEMINI_API_KEY = 'AIzaSyA_6-8P1nNtRrSniqW4TWAFM43veS7xaPM'
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+GEMINI_URL = st.secrets["GEMINI_URL"]
 
 def ask_gemini_about_forecast(summary_text):
     prompt = (
