@@ -1,4 +1,4 @@
-import os
+import streamlit as st
 import pandas as pd
 import yfinance as yf
 from prophet import Prophet
@@ -12,8 +12,8 @@ from tqdm import tqdm
 from ticker_resolver import get_sp500_tickers, resolve_ticker_local
 
 # ========== Gemini LLM 设置 ==========
-GEMINI_API_KEY = 'Your API key'
-GEMINI_URL = "Your URL"
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+GEMINI_URL = st.secrets["GEMINI_URL"]
 
 def ask_gemini_combined(summary_price, summary_sentiment):
     prompt = (
