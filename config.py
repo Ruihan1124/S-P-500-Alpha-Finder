@@ -1,10 +1,7 @@
-import os
-from dotenv import load_dotenv
+import streamlit as st
 
-load_dotenv()
-
-FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
-ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_URL = os.getenv("GEMINI_URL")
+FINNHUB_API_KEY = st.secrets["FINNHUB_API_KEY"]
+ALPHA_VANTAGE_API_KEY = st.secrets["ALPHA_VANTAGE_API_KEY"]
+NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+GEMINI_URL = st.secrets["GEMINI_URL"]
