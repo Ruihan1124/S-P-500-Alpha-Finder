@@ -34,15 +34,45 @@ def ask_gemini_about_forecast(summary_text):
     else:
         print("❌ 请求失败：", response.text)
 
-# ========== Step 1: Load Price Data ==========
+# ========== Step 1: Load Price Data from Alpha Vantage ==========
 def fetch_stock_data(ticker: str, period="5y") -> pd.DataFrame:
-    df = yf.download(ticker, period=period)
-    df = df[["Close"]].copy()
-    df.columns = ["y"]
-    df = df.reset_index().rename(columns={"Date": "ds"})
-    df["y"] = pd.to_numeric(df["y"], errors="coerce")
-    df.dropna(subset=["y", "ds"], inplace=True)
-    return df
+    api_key = st.secrets["ALPHA_VANTAGE_API_KEY"]
+
+    url = f"https://www.alphavantage.co/query"
+    params = {
+        "function": "TIME_SERIES_DAILY_ADJUSTED",
+        "symbol": ticker,
+        "outputsize": "full",  # full returns many years; compact returns 100 days
+        "apikey": api_key
+    }
+
+    try:
+        res = requests.get(url, params=params)
+        res.raise_for_status()
+        data = res.json()
+
+        if "Time Series (Daily)" not in data:
+            st.error(f"Alpha Vantage API 返回错误：{data.get('Note') or data.get('Error Message')}")
+            return pd.DataFrame()
+
+        df = pd.DataFrame.from_dict(data["Time Series (Daily)"], orient="index")
+        df.index = pd.to_datetime(df.index)
+        df.sort_index(inplace=True)
+        df = df[["5. adjusted close"]].rename(columns={"5. adjusted close": "y"})
+        df = df.reset_index().rename(columns={"index": "ds"})
+        df["y"] = pd.to_numeric(df["y"], errors="coerce")
+        df.dropna(subset=["y", "ds"], inplace=True)
+
+        # 只保留近几年（例如 5 年）
+        if period == "5y":
+            cutoff = pd.Timestamp.now() - pd.DateOffset(years=5)
+            df = df[df["ds"] >= cutoff]
+
+        return df
+
+    except Exception as e:
+        st.error(f"❌ 获取股票数据失败：{e}")
+        return pd.DataFrame()
 
 # ========== Step 2: Load and Process Sentiment Data ==========
 def load_sentiment_data(ticker):
